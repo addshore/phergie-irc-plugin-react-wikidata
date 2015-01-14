@@ -1,0 +1,10 @@
+## Project
+vendor/*
+config.php
+build/*
+composer.lock
+
+test.php
+
+## IDE
+.idea/*
