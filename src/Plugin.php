@@ -1,6 +1,6 @@
 <?php
 
-namespace Addshore\Phergie\Plugin\Wikidata;
+namespace Wikidata\Phergie\Plugin\Wikidata;
 
 use Mediawiki\Api\MediawikiApi;
 use Mediawiki\DataModel\Revision;
@@ -10,7 +10,10 @@ use Phergie\Irc\Plugin\React\Command\CommandEvent as Event;
 use Wikibase\Api\WikibaseFactory;
 use Wikibase\DataModel\Entity\Item;
 use Wikibase\DataModel\Entity\ItemId;
+use Wikibase\DataModel\Entity\Property;
 use Wikibase\DataModel\Entity\PropertyId;
+use Wikibase\DataModel\SiteLink;
+use Wikibase\DataModel\Term\Term;
 
 class Plugin extends AbstractPlugin
 {
@@ -54,12 +57,17 @@ class Plugin extends AbstractPlugin
 	 * @return string
 	 */
 	private function getMessage( array $params ) {
-		$noOfParams = count( $params );
-		if( $noOfParams === 0 ) {
+		if( count( $params ) === 0 ) {
 			return 'You didn\'t pass any parameters!';
 		}
+		if( !array_key_exists( 1, $params ) ) {
+			$params[1] = 'default';
+		}
+		if( !array_key_exists( 2, $params ) ) {
+			$params[2] = 'default';
+		}
 
-		/** @var Item|null $item */
+		/** @var Item|Property|null $item */
 		$item = null;
 		/** @var Revision|null $revision */
 		$revision = null;
@@ -75,32 +83,137 @@ class Plugin extends AbstractPlugin
 			return 'Failed to match an entity id in request';
 		}
 
-		if( $item instanceof Item ) {
-			if ( $noOfParams === 1 ) {
-				$msg = strtoupper( $params[0] );
-				if ( $item->getFingerprint()->hasLabel( 'en' ) ) {
-					$msg .= ': ' . $item->getFingerprint()->getLabel( 'en' )->getText();
-					if ( $item->getFingerprint()->hasDescription( 'en' ) ) {
-						$msg .= ' - \'' . $item->getFingerprint()->getDescription( 'en' )->getText() . '\'';
+		if( $item instanceof Item || $item instanceof Property ) {
+			$msg = strtoupper( $params[0] );
+
+			switch ( $params[1] ) {
+				case 'label':
+				case 'labels':
+					$labels = $item->getFingerprint()->getLabels();
+					switch ( $params[2] ) {
+						case 'count':
+						case 'default':
+							return $msg . ': Has ' . $labels->count() . ' label(s)';
+						case 'languages':
+						case 'langs':
+						case 'list':
+							$labelLanguages = array();
+							foreach( $labels->getIterator() as $label ) {
+								/** @var Term $label */
+								$labelLanguages[] = $label->getLanguageCode();
+							}
+							return $msg . ': Has labels for languages: ' . implode( ', ', $labelLanguages );
+							break;
+						default:
+							if( $labels->hasTermForLanguage( $params[2] ) ) {
+								return $msg . ': ' . $params[2] . ' label is "' . $labels->getByLanguage( $params[2] )->getText() . '"';
+							} else {
+								return $msg . ': Exists but there is no ' . $params[2] . ' label';
+							}
 					}
-				} else {
-					$msg .= ': Exists but there is no en label';
-				}
-				return $msg;
-			}
-			if( $noOfParams === 2 ) {
-				$msg = strtoupper( $params[0] );
-				switch ( $params[1] ) {
-					case 'labelcount':
-						return $msg . ': Has ' . $item->getFingerprint()->getLabels()->count() . ' labels';
-					case 'descriptioncount':
-						return $msg . ': Has ' . $item->getFingerprint()->getDescriptions()->count() . ' descriptions';
-					case 'claimcount':
-					case 'statementcount':
-						return $msg . ': Has ' . $item->getStatements()->count() . ' claims / statements';
-					default:
-						return $msg . ': Trying to get unknown attribute';
-				}
+					break;
+				case 'description':
+				case 'descriptions':
+					$descriptions = $item->getFingerprint()->getLabels();
+					switch ( $params[2] ) {
+						case 'count':
+						case 'default':
+							return $msg . ': Has ' . $descriptions->count() . ' description(s)';
+						case 'languages':
+						case 'langs':
+						case 'list':
+							$descriptionLanguages = array();
+							foreach( $descriptions->getIterator() as $description ) {
+								/** @var Term $description */
+								$descriptionLanguages[] = $description->getLanguageCode();
+							}
+							return $msg . ': Has descriptions for languages: ' . implode( ', ', $descriptionLanguages );
+							break;
+						default:
+							if( $descriptions->hasTermForLanguage( $params[2] ) ) {
+								return $msg . ': ' . $params[2] . ' description is "' . $descriptions->getByLanguage( $params[2] )->getText() . '"';
+							} else {
+								return $msg . ': Exists but there is no ' . $params[2] . ' description';
+							}
+					}
+					break;
+				case 'aliases':
+				case 'alias':
+					$aliasGroup = $item->getFingerprint()->getAliasGroups();
+					switch ( $params[2] ) {
+						case 'languages':
+						case 'lang':
+						case 'list':
+						case 'default':
+							// TODO
+							return 'TODO';
+							break;
+						default:
+							if( $aliasGroup->hasGroupForLanguage( $params[2] ) ) {
+								return $msg . ': ' . $params[2] . ' aliases are "' . implode( ', ', $aliasGroup->getByLanguage( $params[2] )->getAliases() ) . '"';
+							} else {
+								return $msg . ': Exists but there are no ' . $params[2] . ' aliases';
+							}
+					}
+					break;
+				case 'claim':
+				case 'claims':
+				case 'statement':
+				case 'statements':
+					// TODO
+					return 'TODO';
+					break;
+				case 'sitelink':
+				case 'sitelinks':
+				case 'site':
+				case 'sites':
+					$siteLinkList = $item->getSiteLinkList();
+					switch ( $params[2] ) {
+						case 'count':
+						case 'default':
+							return $msg . ': Has ' . $siteLinkList->count() . ' sitelinks(s)';
+						case 'sites':
+						case 'list':
+							$siteIds = array();
+							foreach( $siteLinkList->getIterator() as $sitelink ) {
+								/** @var SiteLink $sitelink */
+								$siteIds[] = $sitelink->getSiteId();
+							}
+							return $msg . ': Has sitelinks for sites: ' . implode( ', ', $siteIds );
+							break;
+						default:
+							if( $siteLinkList->hasLinkWithSiteId( $params[2] ) ) {
+								return $msg . ': ' . $params[2] . ' sitelink is "' . $siteLinkList->getBySiteId( $params[2] )->getPageName() . '"';
+							} else {
+								return $msg . ': Exists but there is no ' . $params[2] . ' sitelink';
+							}
+					}
+					break;
+				case 'lastsummary':
+				case 'summary':
+					return $msg . ': Last summary was: ' . $revision->getEditInfo()->getSummary();
+					break;
+				case 'lastuser':
+				case 'user':
+					return $msg . ': Last edited by: ' . $revision->getUser();
+					break;
+				case 'pageid':
+					return $msg . ': Page Id: ' . $revision->getPageId();
+					break;
+				case 'lastedited':
+				case 'edited':
+					return $msg . ': Last edited at: ' . $revision->getTimestamp();
+					break;
+				default:
+					if ( $item->getFingerprint()->hasLabel( 'en' ) ) {
+						$msg .= ': ' . $item->getFingerprint()->getLabel( 'en' )->getText();
+						if ( $item->getFingerprint()->hasDescription( 'en' ) ) {
+							$msg .= ' - \'' . $item->getFingerprint()->getDescription( 'en' )->getText() . '\'';
+						}
+					} else {
+						$msg .= ': Exists but there is no en label';
+					}
+					return $msg;
 			}
 		}
 
